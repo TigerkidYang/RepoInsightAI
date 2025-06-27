@@ -1,0 +1,21 @@
+# TODO: pip install -r requirements.txt
+
+# for cli
+rich
+
+# Core Frameworks
+llama-index
+streamlit
+
+# Utilities
+GitPython
+python-dotenv
+
+# LLM & Embedding Models (Choose one provider or more)
+llama-index-llms-openai
+llama-index-embeddings-openai
+
+# for code splitter
+tree-sitter
+tree-sitter-languages
+tree_sitter_language_pack

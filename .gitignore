@@ -1,0 +1,17 @@
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Cloned repositories from users
+repos/
+
+# Persisted LlamaIndex storage
+storage/
+
+# Environment variables file
+.env
+
+# Streamlit config
+.streamlit/
