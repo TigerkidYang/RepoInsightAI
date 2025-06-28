@@ -1,3 +1,5 @@
+# src/git_utils.py
+
 import os
 import git
 from urllib.parse import urlparse
@@ -29,7 +31,7 @@ def clone_or_pull_repo(repo_url: str) -> str:
     # https://github.com/TigerkidYang/RepoInsightAI.git -> RepoInsightAI
     parsed_url = urlparse(repo_url)
     repo_name = parsed_url.path.split("/")[-1].split('.')[0]
-    local_repo_path = REPOS_DIR + "/" + repo_name
+    local_repo_path = os.path.join(REPOS_DIR, repo_name)
 
     # decide clone or pull
     if os.path.exists(local_repo_path):
@@ -39,13 +41,13 @@ def clone_or_pull_repo(repo_url: str) -> str:
             repo.remotes.origin.pull()
         except Exception as e:
             print(f"Error pulling repository: {e}")
-            return None
+            raise
     else:
         # clone the repository
         try:
             git.Repo.clone_from(repo_url, local_repo_path)
         except Exception as e:
             print(f"Error cloning repository: {e}")
-            return None
+            raise
     
     return local_repo_path
