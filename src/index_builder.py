@@ -5,6 +5,7 @@ load_dotenv()
 from llama_index.core import (
     SimpleDirectoryReader,
     VectorStoreIndex,
+    SummaryIndex,
     StorageContext,
     load_index_from_storage,
     Settings, 
@@ -13,6 +14,9 @@ from llama_index.core.node_parser import CodeSplitter
 # for llm and embedding
 from llama_index.llms.openai import OpenAI
 from llama_index.embeddings.openai import OpenAIEmbedding
+# for document
+from llama_index.core import Document
+from typing import List, Tuple
 
 # LLM and Embedding Global Settings
 Settings.llm = OpenAI(model=os.getenv("LLM_MODEL"))
@@ -20,7 +24,7 @@ Settings.embed_model = OpenAIEmbedding(model=os.getenv("EMBEDDING_MODEL"))
 
 STORAGE_DIR = os.getenv("STORAGE_DIR")
 
-def get_or_create_index(repo_path: str) -> VectorStoreIndex:
+def get_or_create_index(repo_path: str) -> Tuple[VectorStoreIndex, List[Document]]:
     """
     Creates a LlamaIndex VectorStoreIndex from a local repository path.
     If an index has already been created and persisted for this repository,
@@ -41,6 +45,8 @@ def get_or_create_index(repo_path: str) -> VectorStoreIndex:
         # load index from storage
         storage_context = StorageContext.from_defaults(persist_dir=storage_path)
         index = load_index_from_storage(storage_context)
+        nodes = list(index.docstore.docs.values())
+
     else:
         # create index
         
@@ -67,10 +73,11 @@ def get_or_create_index(repo_path: str) -> VectorStoreIndex:
 
         # pass the parser
         Settings.node_parser = code_splitter
+        nodes = Settings.node_parser.get_nodes_from_documents(documents, show_progress=True)
 
         # create index and persist it
-        index = VectorStoreIndex.from_documents(documents, show_progress=True)
+        index = VectorStoreIndex(nodes, show_progress=True)
         index.storage_context.persist(persist_dir=storage_path)
     
-    return index
+    return index, nodes
         
