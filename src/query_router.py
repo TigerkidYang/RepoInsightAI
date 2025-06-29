@@ -58,7 +58,7 @@ def create_query_router(vector_index: VectorStoreIndex, nodes: List[BaseNode], v
         selector=LLMSingleSelector.from_defaults(),
         query_engine_tools=[
             vector_tool, 
-            summary_tool
+            summary_tool,
         ],
         verbose=verbose,
     )

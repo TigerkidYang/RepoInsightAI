@@ -9,6 +9,8 @@ from llama_index.core.llms import LLM
 from .language_utils import EXTENSION_TO_LANGUAGE_MAP
 from llama_index.core import PromptTemplate
 
+# FOR QUICK START GUIDE DOCUMENTATION GENERATION --------------------------------------------------------------------
+
 class KeyFileInfo(BaseModel):
     """Data model for key files identified for the quick start guide"""
     file_path: str
@@ -144,3 +146,105 @@ def generate_quick_start(repo_path: str, query_engine: BaseQueryEngine, llm: LLM
     except Exception as e:
         # This will now correctly handle errors from the final predict call
         return f"Error: Could not synthesize the final guide. Details: {e}"
+
+# FOR API DOCUMENTATION GENERATION --------------------------------------------------------------------
+
+class APIParameter(BaseModel):
+    """Data model for a single function/method parameter"""
+    name: str
+    param_type: str = "any"
+    description: str
+
+class APIMethod(BaseModel):
+    """Data model for a single function/method"""
+    name: str
+    parameters: List[APIParameter]
+    returns: str
+    description: str
+
+class APIClass(BaseModel):
+    """Data model for a single class"""
+    name: str
+    description: str
+    methods: List[APIMethod]
+
+class APIFile(BaseModel):
+    """Data model for the entire API structure of a single file"""
+    file_path: str
+    classes: List[APIClass]
+    functions: List[APIMethod]
+
+def generate_api_docs(repo_path: str, llm: LLM) -> str:
+    """
+    Generates API documentation for all source code files in a repository.
+
+    This function iterates through each source file, uses an LLM to parse its
+    structure into Pydantic models, and then formats this structured data
+    into a comprehensive Markdown document.
+
+    Args:
+        repo_path (str): The local path to the repository.
+        llm (LLM): The language model to perform code parsing tasks.
+
+    Returns:
+        str: The generated API documentation in Markdown format.
+    """
+    # identify all source code files
+    source_files = []
+    source_extensions = EXTENSION_TO_LANGUAGE_MAP.keys()
+    for root, _, files in os.walk(repo_path):
+        if any(d in root for d in [".git", "node_modules", "target", "build", "dist"]):
+            continue
+        for file in files:
+            if os.path.splitext(file)[1] in source_extensions:
+                source_files.append(os.path.join(root, file))
+    if not source_files:
+        return "No source code files found to generate API documentation."
+    
+    # process each file and generate API documentation
+    api_docs_str_list = []
+    api_extraction_template = PromptTemplate(
+        "You are an expert at parsing code and generating API documentation.\n"
+        "Analyze the following source code file and extract all public classes and functions.\n"
+        "For each class, extract its public methods. For each function or method, extract its parameters, return value, and a clear description based on its docstring or implementation.\n"
+        "If a type is not specified, use 'any'. If a return value is not specified, use 'None'.\n\n"
+        "SOURCE CODE FILE PATH: {file_path}\n"
+        "---------------------\n"
+        "```\n"
+        "{code_content}\n"
+        "```\n"
+        "---------------------\n"
+    )
+    for file_path in source_files:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            code_content = f.read()
+        structured_response = llm.structured_predict(
+            APIFile,
+            api_extraction_template,
+            file_path=file_path,
+            code_content=code_content
+        )
+
+        markdown_str = f"## File: `{structured_response.file_path}`\n\n"
+        if structured_response.classes:
+            for cls in structured_response.classes:
+                markdown_str += f"### class `{cls.name}`\n"
+                markdown_str += f"> {cls.description}\n\n"
+                if cls.methods:
+                    for method in cls.methods:
+                        params = ", ".join([f"{p.name}: *{p.param_type}*" for p in method.parameters])
+                        markdown_str += f"- **`{method.name}`**({params}) -> *{method.returns}*\n"
+                        markdown_str += f"  - {method.description}\n"
+                markdown_str += "\n"
+
+        if structured_response.functions:
+            markdown_str += "### Standalone Functions\n"
+            for func in structured_response.functions:
+                params = ", ".join([f"{p.name}: *{p.param_type}*" for p in func.parameters])
+                markdown_str += f"- **`{func.name}`**({params}) -> *{func.returns}*\n"
+                markdown_str += f"  - {func.description}\n"
+
+        api_docs_str_list.append(markdown_str)
+    
+    return "\n---\n".join(api_docs_str_list)
+

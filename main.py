@@ -7,11 +7,14 @@ import re
 from src.git_utils import clone_or_pull_repo
 from src.index_builder import get_or_create_index
 from src.query_router import create_query_router
-from src.doc_generator import generate_quick_start
+from src.doc_generator import generate_quick_start, generate_api_docs
+from src.tools import get_file_tree
 
 # LlamaIndex modules
 from llama_index.core.chat_engine import CondenseQuestionChatEngine
 from llama_index.core import Settings
+from llama_index.core.agent.workflow import ReActAgent
+from llama_index.core.tools import QueryEngineTool, ToolMetadata, FunctionTool
 
 
 # --- 2. Helper Functions ---
@@ -38,14 +41,21 @@ st.set_page_config(
 
 # --- 4. Session State Initialization ---
 # This is the "memory" of the Streamlit app. It preserves data across reruns.
+# We initialize all possible state variables here to avoid errors.
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "chat_engine" not in st.session_state:
     st.session_state.chat_engine = None
+if "query_engine" not in st.session_state: # To pass to doc generators
+    st.session_state.query_engine = None
 if "repo_path" not in st.session_state:
     st.session_state.repo_path = None
 if "quick_start_guide" not in st.session_state:
     st.session_state.quick_start_guide = None
+if "api_docs" not in st.session_state:
+    st.session_state.api_docs = None
+if "file_tree" not in st.session_state:
+    st.session_state.file_tree = None
 
 
 # --- 5. Application UI and Logic ---
@@ -59,7 +69,7 @@ with st.sidebar:
     st.header("1. Configure Your Codebase")
     repo_url = st.text_input(
         "Enter GitHub Repository URL",
-        placeholder="e.g., https://github.com/streamlit/streamlit"
+        placeholder="e.g., https://github.com/jerryjliu/llama_index"
     )
 
     if st.button("Analyze Repository", type="primary", use_container_width=True):
@@ -70,8 +80,9 @@ with st.sidebar:
             # It performs all heavy lifting and stores results in the session state.
             with st.spinner("Analysis in progress, please wait..."):
                 try:
-                    # Clear any previous results
+                    # Clear any previous results to start fresh
                     st.session_state.quick_start_guide = None
+                    st.session_state.api_docs = None
                     st.session_state.messages = []
                     
                     st.info("Step 1: Cloning repository...")
@@ -81,12 +92,29 @@ with st.sidebar:
                     vector_index, nodes = get_or_create_index(st.session_state.repo_path)
                     
                     st.info("Step 3: Creating smart query router...")
-                    query_engine = create_query_router(vector_index, nodes, verbose=False)
+                    st.session_state.query_engine = create_query_router(vector_index, nodes, verbose=False)
                     
-                    st.info("Step 4: Creating stateful chat engine...")
-                    st.session_state.chat_engine = CondenseQuestionChatEngine.from_defaults(
-                        query_engine=query_engine,
-                        verbose=False
+                    st.info("Step 4: Creating ReAct agent with multiple tools...")
+                    # Tool1: RAG Router
+                    query_engine_tool = QueryEngineTool(
+                        query_engine=st.session_state.query_engine,
+                        metadata=ToolMetadata(
+                            name="codebase_qa_system",
+                            description="The primary tool for answering any questions about the analyzed code repository. Use this for all questions related to code, implementation, project purpose, and file content."
+                        )
+                    )
+                    # Tool2: File Tree Viewer
+                    file_tree_tool = FunctionTool.from_defaults(
+                        fn=lambda: get_file_tree(st.session_state.repo_path),
+                        name="file_tree_viewer",
+                        description="Extremely useful for understanding the project's structure. Use this specific tool ONLY when the user asks to 'list files', 'show the directory structure', or 'what is the file tree?'"          
+                    )
+
+                    # Create the ReAct agent
+                    st.session_state.chat_engine = ReActAgent(
+                        tools=[query_engine_tool, file_tree_tool],
+                        llm=Settings.llm,
+                        verbose=True
                     )
                     
                     # Set up the initial welcome message for the chat
@@ -105,74 +133,90 @@ with st.sidebar:
     if st.session_state.chat_engine:
         st.divider()
         st.header("2. Generate Documents")
+
+        if st.button("Generate File Tree", use_container_width=True):
+            with st.spinner("🌳 Generating file tree..."):
+                tree = get_file_tree(st.session_state.repo_path)
+                st.session_state.file_tree = tree
+            st.success("File Tree generated!")
         
         if st.button("Generate Quick Start Guide", use_container_width=True):
             with st.spinner("🚀 Generating Quick Start Guide... This may take a moment."):
                 guide = generate_quick_start(
                     st.session_state.repo_path,
-                    st.session_state.chat_engine, # Pass the chat engine for summarization
+                    st.session_state.query_engine, # Use the base query engine for summarization
                     Settings.llm
                 )
                 st.session_state.quick_start_guide = guide
             st.success("Quick Start Guide generated!")
-            # No need to rerun, Streamlit will update the tab content automatically
+
+        if st.button("Generate API Docs", use_container_width=True):
+            with st.spinner("🛠️ Generating API Docs... This is a deep process and may take several minutes."):
+                docs = generate_api_docs(
+                    st.session_state.repo_path,
+                    Settings.llm
+                )
+                st.session_state.api_docs = docs
+            st.success("API Docs generated!")
 
     st.divider()
     st.info("Powered by LlamaIndex.")
 
 # --- 6. Main Page Content (Tabs) ---
 
-# Set up a welcome message if the chat is empty
+# Set up a welcome message if chat history is empty
 if not st.session_state.messages:
-    st.session_state.messages = [
-        {"role": "assistant", "content": "Hello! Please enter a GitHub repository URL on the left and click 'Analyze' to get started."}
-    ]
+     st.session_state.messages = [{"role": "assistant", "content": "Hello! Please enter a GitHub repository URL on the left and click 'Analyze' to get started."}]
 
 # Create tabs for different functionalities
-tab_chat, tab_quick_start = st.tabs(["💬 Chat with Repo", "🚀 Quick Start Guide"])
+tab_chat, tab_file_tree, tab_quick_start, tab_api_docs = st.tabs(["💬 Chat with Repo", "🌳 File Tree", "🚀 Quick Start Guide", "🛠️ API Docs"])
 
-# --- Chat Tab Logic (Canonical Pattern) ---
+# Chat Tab Logic
 with tab_chat:
-    # 1. First, display all historical messages
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # 2. Then, render the chat input at the bottom.
-    # The `if` block executes ONLY when the user submits a new message.
     if prompt := st.chat_input("Ask anything about this codebase..."):
-        # Ensure the engine is ready before processing
         if not st.session_state.chat_engine:
             st.warning("Please analyze a repository first.", icon="⚠️")
         else:
-            # 3. Add user's new message to the state
             st.session_state.messages.append({"role": "user", "content": prompt})
-
-            # 4. Get AI's response
             with st.spinner("AI is thinking..."):
                 response = st.session_state.chat_engine.chat(prompt)
                 ai_response = str(response)
-            
-            # 5. Add AI's new response to the state
-            st.session_state.messages.append({"role": "assistant", "content": ai_response})
+                st.session_state.messages.append({"role": "assistant", "content": ai_response})
+            st.rerun() # Rerun to display the new messages immediately
 
-            # 6. Let Streamlit rerun from the top.
-            # The rerun will automatically display the new messages from the state.
-            st.rerun()
+# File Tree Tab Logic
+with tab_file_tree:
+    st.header("🌳 Repository File Tree")
+    if st.session_state.file_tree:
+        # Use st.code to display the tree with a fixed-width font for proper alignment
+        st.code(st.session_state.file_tree, language=None)
+    else:
+        st.info("Click the 'Generate File Tree' button in the sidebar to see the repository structure here.")
 
 # Quick Start Guide Tab Logic
 with tab_quick_start:
+    st.header("🚀 Quick Start Guide")
     if st.session_state.quick_start_guide:
-        # Clean and display the generated guide
         cleaned_guide = clean_markdown_output(st.session_state.quick_start_guide)
         st.markdown(cleaned_guide)
-        
-        # Add a download button for the guide
         st.download_button(
-            label="Download Guide",
-            data=cleaned_guide,
-            file_name="QUICK_START_GUIDE.md",
-            mime="text/markdown",
+            label="Download Guide", data=cleaned_guide, file_name="QUICK_START_GUIDE.md", mime="text/markdown"
         )
     else:
-        st.info("Click the 'Generate Quick Start Guide' button in the sidebar after analyzing a repository to see the guide here.")
+        st.info("Click the 'Generate Quick Start Guide' button in the sidebar after analyzing a repository.")
+
+# API Docs Tab Logic
+with tab_api_docs:
+    st.header("🛠️ API Documentation")
+    if st.session_state.api_docs:
+        cleaned_docs = clean_markdown_output(st.session_state.api_docs)
+        st.markdown(cleaned_docs)
+        st.download_button(
+            label="Download API Docs", data=cleaned_docs, file_name="API_DOCS.md", mime="text/markdown"
+        )
+    else:
+        st.info("Click the 'Generate API Docs' button in the sidebar after analyzing a repository.")
