@@ -15,3 +15,6 @@ storage/
 
 # Streamlit config
 .streamlit/
+
+# to put all code in one thing
+repoinsightai.ipynb

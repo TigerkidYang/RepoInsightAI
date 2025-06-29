@@ -8,13 +8,14 @@ from src.git_utils import clone_or_pull_repo
 from src.index_builder import get_or_create_index
 from src.query_router import create_query_router
 from src.doc_generator import generate_quick_start, generate_api_docs
-from src.tools import get_file_tree
+from src.tools import get_file_tree, internet_search
 
 # LlamaIndex modules
 from llama_index.core.chat_engine import CondenseQuestionChatEngine
 from llama_index.core import Settings
-from llama_index.core.agent.workflow import ReActAgent
+from llama_index.agent.openai import OpenAIAgent
 from llama_index.core.tools import QueryEngineTool, ToolMetadata, FunctionTool
+from llama_index.core.memory import ChatMemoryBuffer
 
 
 # --- 2. Helper Functions ---
@@ -109,12 +110,32 @@ with st.sidebar:
                         name="file_tree_viewer",
                         description="Extremely useful for understanding the project's structure. Use this specific tool ONLY when the user asks to 'list files', 'show the directory structure', or 'what is the file tree?'"          
                     )
+                    # Tool3: Internet Search
+                    search_tool = FunctionTool.from_defaults(
+                        fn=internet_search,
+                        name="internet_search",
+                        description=(
+                            "A powerful tool to search the internet for real-time information, "
+                            "definitions of external libraries, or general programming concepts "
+                            "not found within the local codebase."
+                        )
+                    )
 
-                    # Create the ReAct agent
-                    st.session_state.chat_engine = ReActAgent(
-                        tools=[query_engine_tool, file_tree_tool],
+                    memory = ChatMemoryBuffer.from_defaults(token_limit=4096)
+
+                    st.session_state.chat_engine = OpenAIAgent.from_tools(
+                        tools=[query_engine_tool, file_tree_tool, search_tool],
                         llm=Settings.llm,
-                        verbose=True
+                        memory=memory,
+                        system_prompt="""
+                        You are a helpful and expert AI assistant for understanding code repositories.
+                        You have two types of tools:
+                        1. A codebase Q&A system to answer questions about the code.
+                        2. A file tree viewer to show the directory structure.
+                        3. A web search tool to find real-time information, definitions of external libraries, or general programming concepts not found within the local codebase.
+                        Always use your tools to answer questions.
+                        """,
+                        verbose=True # Keep verbose=True for debugging agent's thoughts in your console!
                     )
                     
                     # Set up the initial welcome message for the chat

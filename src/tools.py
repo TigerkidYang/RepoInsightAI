@@ -1,5 +1,8 @@
 # src/tools.py
 import os
+from duckduckgo_search import DDGS
+
+# FOR FILE TREE GENERATION --------------------------------------------------------------------
 
 def get_file_tree(repo_path: str, max_depth: int = 3) -> str:
     """
@@ -36,3 +39,27 @@ def get_file_tree(repo_path: str, max_depth: int = 3) -> str:
             
     return tree_str
 
+# FOR SEARCHING THE WEB --------------------------------------------------------------------
+
+def internet_search(query: str, max_results: int = 5) -> str:
+    """
+    Performs an internet search using DuckDuckGo and returns the results.
+
+    Args:
+        query (str): The search query.
+        max_results (int): The maximum number of results to return.
+
+    Returns:
+        str: A formatted string of the search results, including title, snippet, and URL.
+    """
+    results_str = ""
+    with DDGS() as ddgs:
+        results = list(ddgs.text(query, max_results=max_results))
+    if not results:
+        return f"No search results found for '{query}'."
+    for i, result in enumerate(results, 1):
+        results_str += f"Result {i}:\n"
+        results_str += f"  - Title: {result.get('title', 'N/A')}\n"
+        results_str += f"  - Snippet: {result.get('body', 'N/A')}\n"
+        results_str += f"  - URL: {result.get('href', 'N/A')}\n\n"
+    return results_str.strip()
